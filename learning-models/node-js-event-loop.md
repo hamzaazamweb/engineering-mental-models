@@ -104,33 +104,33 @@ This document illustrates how the Node.js Event Loop handles different types of 
 Imagine this code is running a restaurant. It has three distinct "buttons" (routes) a user can press.
 
 ```javascript
-const express = require('express');
-const fs = require('fs'); // File System module (I/O operations)
+const express = require("express");
+const fs = require("fs"); // File System module (I/O operations)
 const app = express();
 
 // --- ROUTE 1: The "Fast Food" (Synchronous) ---
-app.get('/', (req, res) => {
-  console.log('A. Fast Route Hit');
-  res.send('Hello World!');
+app.get("/", (req, res) => {
+  console.log("A. Fast Route Hit");
+  res.send("Hello World!");
 });
 
 // --- ROUTE 2: The "Slow Cooked" (Asynchronous I/O) ---
-app.get('/read-file', (req, res) => {
-  console.log('B. Reading File Started');
+app.get("/read-file", (req, res) => {
+  console.log("B. Reading File Started");
 
   // The Waiter delegates this to the Kitchen (Kernel/Thread Pool)
-  fs.readFile('./big-file.txt', 'utf8', (err, data) => {
+  fs.readFile("./big-file.txt", "utf8", (err, data) => {
     // This callback runs LATER in the Poll Phase
-    console.log('C. File Read Complete');
-    res.send('File content sent!');
+    console.log("C. File Read Complete");
+    res.send("File content sent!");
   });
 
-  console.log('D. Reading File Delegated');
+  console.log("D. Reading File Delegated");
 });
 
 // --- ROUTE 3: The "Bad Chef" (CPU Blocking) ---
-app.get('/block-me', (req, res) => {
-  console.log('E. Blocking Route Hit');
+app.get("/block-me", (req, res) => {
+  console.log("E. Blocking Route Hit");
 
   // HEAVY MATH - The Waiter is trapped here!
   // This blocks the Single Thread.
@@ -139,14 +139,15 @@ app.get('/block-me', (req, res) => {
     count++;
   }
 
-  console.log('F. Blocking Finished');
-  res.send('Done!');
+  console.log("F. Blocking Finished");
+  res.send("Done!");
 });
 
 // Start the Server
 app.listen(3000, () => {
-  console.log('Server is Open!');
+  console.log("Server is Open!");
 });
+```
 
 # Step-by-Step Walkthrough: The Event Loop in Express.js
 
@@ -156,84 +157,93 @@ This guide follows the "Waiter" (Main Thread) through three specific scenarios i
 
 ## 🛑 Phase 0: The Setup (Startup)
 
-* **Action:** You run the command `node app.js`.
-* **The Waiter (Main Thread):**
-    1.  Reads the menu (Compiles the JavaScript code).
-    2.  Sets up the kitchen stations (Registers the routes `/`, `/read-file`, `/block-me`).
-    3.  Opens the front door (Starts listening on port 3000).
-* **Current State:** The Waiter is now standing in the **Poll Phase**. His hands are empty. He is just waiting for a customer.
+- **Action:** You run the command `node app.js`.
+- **The Waiter (Main Thread):**
+  1.  Reads the menu (Compiles the JavaScript code).
+  2.  Sets up the kitchen stations (Registers the routes `/`, `/read-file`, `/block-me`).
+  3.  Opens the front door (Starts listening on port 3000).
+- **Current State:** The Waiter is now standing in the **Poll Phase**. His hands are empty. He is just waiting for a customer.
 
 ---
 
 ## 🚀 Scenario 1: The "Fast Food" Route (Synchronous)
+
 **User visits:** `GET /`
 
 1.  **Event:** A request arrives at the door.
 2.  **Poll Phase:** The Waiter sees the request in the queue and picks it up immediately.
 3.  **Execution:** He runs the callback function defined for `/`.
-    * `console.log('A. Fast Route Hit')` runs.
-    * `res.send('Hello World!')` runs.
+    - `console.log('A. Fast Route Hit')` runs.
+    - `res.send('Hello World!')` runs.
 4.  **Completion:** The function finishes. The Waiter returns to the **Poll Phase** to wait for the next person.
-    * *Time taken:* ~0.1ms (Instant).
+    - _Time taken:_ ~0.1ms (Instant).
 
 ---
 
 ## ⏳ Scenario 2: The "Slow Cooked" Route (Asynchronous I/O)
+
 **User visits:** `GET /read-file`
 
 ### Part A: The Delegation
+
 1.  **Event:** A request arrives.
 2.  **Execution:** The Waiter picks it up.
-    * He prints: `B. Reading File Started`.
-    * He encounters `fs.readFile`.
+    - He prints: `B. Reading File Started`.
+    - He encounters `fs.readFile`.
 3.  **The Handoff:**
-    * The Waiter sees this is an **I/O task**. He does **not** do it himself.
-    * He writes a "ticket" for the **System Kernel (Kitchen Staff)**: *"Please read big-file.txt and let me know when you are done."*
-    * He registers a **callback function** (what to do when the file is ready) and puts it aside.
+    - The Waiter sees this is an **I/O task**. He does **not** do it himself.
+    - He writes a "ticket" for the **System Kernel (Kitchen Staff)**: _"Please read big-file.txt and let me know when you are done."_
+    - He registers a **callback function** (what to do when the file is ready) and puts it aside.
 4.  **Moving On:**
-    * He immediately moves to the next line of code.
-    * He prints: `D. Reading File Delegated`.
+    - He immediately moves to the next line of code.
+    - He prints: `D. Reading File Delegated`.
 5.  **Free Again:** His hands are empty! He goes back to the **Poll Phase**. He is now free to serve other users (like Scenario 1) while the file is being read in the background.
 
 ### Part B: The Return
+
 1.  **The Kitchen:** The hard drive finishes reading the file. The Kernel puts the data into the **Poll Queue**.
 2.  **The Waiter:**
-    * Finishes whatever tiny task he was doing.
-    * Checks the queue: "Oh, the file for Scenario 2 is ready!"
+    - Finishes whatever tiny task he was doing.
+    - Checks the queue: "Oh, the file for Scenario 2 is ready!"
 3.  **Callback Execution:**
-    * He runs the specific callback he saved earlier.
-    * He prints: `C. File Read Complete`.
-    * He sends the file content to the user.
+    - He runs the specific callback he saved earlier.
+    - He prints: `C. File Read Complete`.
+    - He sends the file content to the user.
 
 ---
 
 ## ⛔ Scenario 3: The "Bad Chef" Route (CPU Blocking)
+
 **User visits:** `GET /block-me`
 
 1.  **Event:** A request arrives.
 2.  **Execution:** The Waiter picks it up.
-    * He prints: `E. Blocking Route Hit`.
+    - He prints: `E. Blocking Route Hit`.
 3.  **The Trap (Blocking the Loop):**
-    * He enters a `while` loop that counts from 0 to 5,000,000,000.
-    * This is **CPU work**, not I/O work. He cannot delegate this. He must count every number himself.
+    - He enters a `while` loop that counts from 0 to 5,000,000,000.
+    - This is **CPU work**, not I/O work. He cannot delegate this. He must count every number himself.
 4.  **The Crisis:**
-    * While he is counting (which takes ~10 seconds), **he cannot move**.
-    * **User A hits `/`:** The request sits in the queue. The Waiter ignores it.
-    * **User B hits `/read-file`:** The request sits in the queue. The Waiter ignores it.
-    * **The Kitchen:** Finishes a file read and rings the bell. The Waiter ignores it.
+    - While he is counting (which takes ~10 seconds), **he cannot move**.
+    - **User A hits `/`:** The request sits in the queue. The Waiter ignores it.
+    - **User B hits `/read-file`:** The request sits in the queue. The Waiter ignores it.
+    - **The Kitchen:** Finishes a file read and rings the bell. The Waiter ignores it.
 5.  **The Release:**
-    * Finally, `count` reaches 5 billion.
-    * He prints: `F. Blocking Finished`.
-    * He sends the response: "Done!".
+    - Finally, `count` reaches 5 billion.
+    - He prints: `F. Blocking Finished`.
+    - He sends the response: "Done!".
 6.  **The Aftermath:**
-    * Now that he is free, he rushes to the **Poll Queue** to handle all the angry customers (User A and User B) who were waiting while he was counting.
+    - Now that he is free, he rushes to the **Poll Queue** to handle all the angry customers (User A and User B) who were waiting while he was counting.
 
 ---
 
 ## 🔑 Key Takeaways
-| Action | Is the Waiter Blocked? | Can he serve others? |
-| :--- | :--- | :--- |
-| **console.log** | No (Instant) | Yes |
-| **fs.readFile** | No (Delegated) | **YES** (This is the magic of Node.js) |
-| **while loop / Math** | **YES** | **NO** (The server freezes) |
+
+| Action                | Is the Waiter Blocked? | Can he serve others?                   |
+| :-------------------- | :--------------------- | :------------------------------------- |
+| **console.log**       | No (Instant)           | Yes                                    |
+| **fs.readFile**       | No (Delegated)         | **YES** (This is the magic of Node.js) |
+| **while loop / Math** | **YES**                | **NO** (The server freezes)            |
+
+```
+
 ```
