@@ -247,3 +247,49 @@ This guide follows the "Waiter" (Main Thread) through three specific scenarios i
 ```
 
 ```
+
+# Real-World Scenarios: Mastering the Event Loop in System Design
+
+Here are **5 Real-World Scenarios** where understanding the Event Loop, `nextTick`, and I/O handling is critical.
+
+## 1. The "Traffic Cop" Scenario (Building High-Performance API Gateways)
+
+- **The Challenge:** You need to build a server that sits in front of your database and handles 100,000 requests per second. It doesn't do math; it just authenticates users and fetches data.
+- **How this knowledge helps:** You know Node.js is perfect for this because it is **I/O Bound**.
+- **Design Choice:** You confidently choose Node.js over Python or Java because you know the "Waiter" can handle 50,000 pending database requests without needing 50,000 threads (which would crash a normal server). You know the **Poll Phase** will efficiently manage all these waiting customers.
+
+## 2. The "Frozen Server" Scenario (Handling CPU-Intensive Tasks)
+
+- **The Challenge:** Your app allows users to upload profile pictures, and the server needs to resize them. Suddenly, when one user uploads a huge 4k image, the _entire website_ stops loading for everyone else.
+- **How this knowledge helps:** You recognize **Blocking the Event Loop**.
+- **Design Choice:** You know that image resizing is **CPU Bound** ("chopping carrots"). You know the Single Thread cannot do this. Instead of trying to optimize the loop, you immediately reach for **Worker Threads** or a separate **Microservice** (hiring a second chef) to handle the heavy lifting so the main Waiter can keep serving fast requests.
+
+## 3. The "Infinite Loading" Bug (Debugging Production Lag)
+
+- **The Challenge:** Your production server is running slow, but CPU usage is low. The logs show that simple database queries are taking 5 seconds to start.
+- **How this knowledge helps:** You suspect **Queue Starvation**.
+- **Design Choice:** You look at the code and find a recursive function using `process.nextTick()`. You realize the Waiter is stuck in the "VIP Pocket" loop and never walking to the "Poll Station" to pick up the database results. You switch it to `setImmediate()` to allow the loop to breathe.
+
+## 4. The "Real-Time Chat" Scenario (WebSockets & Scalability)
+
+- **The Challenge:** You are building a WhatsApp clone. You have 10,000 users connected at once. You need to broadcast a message to a group instantly.
+- **How this knowledge helps:** You understand **Concurrency vs. Parallelism**.
+- **Design Choice:** You know Node.js holds open connections cheaply. However, when broadcasting a message to 1,000 people, you use `setImmediate` or chunking.
+  - _Why?_ If you use a `for` loop to send all 1,000 messages at once synchronously, the Waiter is blocked sending them, and incoming messages will lag. By using `setImmediate` every 100 messages, you let the Waiter check for new "Incoming" messages in between batches.
+
+## 5. The "Fairness" Scenario (Batch Processing Data)
+
+- **The Challenge:** You have a script that reads 1 million rows from a CSV file and inserts them into a database. The script crashes the database or runs out of memory.
+- **How this knowledge helps:** You understand **Flow Control**.
+- **Design Choice:** You don't just read the whole file (blocking the loop). You use **Streams** (processing small chunks). You use `setImmediate` after processing every 100 rows to let the Garbage Collector ("The Janitor") run in the Close/Check phases, preventing memory leaks and ensuring the server stays responsive to other health-check requests during the import.
+
+---
+
+## Summary Table for System Design Interviews
+
+| Scenario                | The Concept        | The Design Decision                                                                   |
+| :---------------------- | :----------------- | :------------------------------------------------------------------------------------ |
+| **Netflix/Uber API**    | Non-blocking I/O   | Use Node.js for the "Glue" layer (talking to DBs).                                    |
+| **Video Encoding**      | CPU Blocking       | **DO NOT** use Node's main thread. Offload to a queue (RabbitMQ) + Python/Go workers. |
+| **Live Sports Updates** | Event Loop Phases  | Use `setImmediate` to break up large broadcasts so the server doesn't freeze.         |
+| **Error Handling**      | `process.nextTick` | Ensure error listeners are attached _before_ the error emits.                         |
